@@ -258,6 +258,7 @@ private:
     // for data view
     std::atomic<qint64> lastUpdatedMs = QDateTime::currentMSecsSinceEpoch();
     DataViewHtmlGenerator dataViewHtmlGenerator_;
+    QString m_lastDataViewHtml; // UI thread only; skip setHtml when unchanged
 
     // shortcuts
     QList<QShortcut*> hiddenMenuShortcuts;

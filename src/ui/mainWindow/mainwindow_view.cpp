@@ -55,8 +55,10 @@ void MainWindow::UpdateDataView(bool force)
         return;
     }
     auto html = dataViewHtmlGenerator_.buildHtml();
-    runOnUiThread([=, this] {
-        ui->data_view->setHtml(html);
+    runOnUiThread([html = std::move(html), this]() mutable {
+        if (html == m_lastDataViewHtml) return;
+        m_lastDataViewHtml = std::move(html);
+        ui->data_view->setHtml(m_lastDataViewHtml);
     }, true);
     lastUpdatedMs.store(QDateTime::currentMSecsSinceEpoch());
 }

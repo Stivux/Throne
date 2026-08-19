@@ -56,6 +56,7 @@ void DataViewHtmlGenerator::addTestProgress(int count) {
 QString DataViewHtmlGenerator::buildHtml() {
     QMutexLocker lk(&mu_);
     QString html;
+    html.reserve(512);
     if (download_.visible) {
         html += downloadSectionHtml();
     }
@@ -74,35 +75,27 @@ QString DataViewHtmlGenerator::buildHtml() {
 }
 
 QString DataViewHtmlGenerator::autoSelectorSectionHtml() {
-    QString res = QString("<p style='text-align:center;margin:0;'>%1</p>").arg(autoSelector_.summary.toHtmlEscaped());
+    QString res = QStringLiteral("<p style='text-align:center;margin:0;'>%1</p>").arg(autoSelector_.summary.toHtmlEscaped());
     if (!autoSelector_.detail.isEmpty()) {
-        res += QString("<p style='text-align:center;margin:0;opacity:0.75;'>%1</p>")
+        res += QStringLiteral("<p style='text-align:center;margin:0;opacity:0.75;'>%1</p>")
                    .arg(autoSelector_.detail.toHtmlEscaped());
     }
     return res;
 }
 
 QString DataViewHtmlGenerator::getProgressBar(long long current, long long total) {
-    qint64 count = 0;
+    int filled = 0;
     if (total > 0) {
-        count = 10 * current / total;
+        filled = static_cast<int>(qBound(0LL, 10 * current / total, 10LL));
     }
-    QString progressText;
-    for (int i = 0; i < 10; i++) {
-        if (count--; count >= 0) {
-            progressText += "#";
-        } else {
-            progressText += "-";
-        }
-    }
-    return progressText;
+    return QString(filled, QLatin1Char('#')) % QString(10 - filled, QLatin1Char('-'));
 }
 
 QString DataViewHtmlGenerator::downloadSectionHtml() {
-    auto progressText = getProgressBar(download_.report.downloadedSize, download_.report.totalSize);
-    const QString stat =
-        ReadableSize(download_.report.downloadedSize) + "/" + ReadableSize(download_.report.totalSize);
-    return QString("<p style='text-align:center;margin:0;'>Downloading %1: %2 %3</p>")
+    const auto progressText = getProgressBar(download_.report.downloadedSize, download_.report.totalSize);
+    const QString stat = ReadableSize(download_.report.downloadedSize) % QLatin1Char('/')
+                         % ReadableSize(download_.report.totalSize);
+    return QStringLiteral("<p style='text-align:center;margin:0;'>Downloading %1: %2 %3</p>")
         .arg(download_.report.fileName, stat, progressText);
 }
 
@@ -110,10 +103,12 @@ QString DataViewHtmlGenerator::speedtestSectionHtml() {
     if (speedtest_.kind == SpeedtestPanelState::Kind::Speed) {
         auto firstLine = QStringLiteral("Running Speedtest: %1").arg(speedtest_.profileName);
         if (speedtest_.totalProfiles > 1) {
-            firstLine += QString(" (%1 / %2)").arg(Int2String(testProgress.load()), Int2String(speedtest_.totalProfiles));
+            firstLine += QStringLiteral(" (%1 / %2)").arg(testProgress.load()).arg(speedtest_.totalProfiles);
         }
-        if (speedtest_.serverName.isEmpty()) return QString("<p style='text-align:center;margin:0;'>%1</p>").arg(firstLine);
-        return QString(
+        if (speedtest_.serverName.isEmpty()) {
+            return QStringLiteral("<p style='text-align:center;margin:0;'>%1</p>").arg(firstLine);
+        }
+        return QStringLiteral(
            "<p style='text-align:center;margin:0;'>%1</p>"
            "<div style='text-align: center;'>"
            "<span style='color: #3299FF;'>Dl↓ %2</span>  "
@@ -122,30 +117,37 @@ QString DataViewHtmlGenerator::speedtestSectionHtml() {
            "<p style='text-align:center;margin:0;'>Server: %4%5, %6</p>")
             .arg(firstLine, speedtest_.dlSpeed, speedtest_.ulSpeed, speedtest_.serverCountryFlag, speedtest_.serverCountry,
                 speedtest_.serverName);
-    } else {
-        QString res;
-        auto content = QString("Running Country Test");
-        if (speedtest_.totalProfiles > 1) {
-            auto progress = getProgressBar(testProgress.load(), speedtest_.totalProfiles);
-            progress += QString(" ") + Int2String(100 * testProgress.load() / speedtest_.totalProfiles) + "%";
-            res = QString("<p style='text-align:center;margin:0;'>%1</p>").arg(progress);
-            content += QString(" (%1 / %2)").arg(Int2String(testProgress.load()), Int2String(speedtest_.totalProfiles));
-        }
-        res += QString("<p style='text-align:center;margin:0;'>%1</p>").arg(content);
-        return res;
     }
+
+    QString res;
+    auto content = QStringLiteral("Running Country Test");
+    if (speedtest_.totalProfiles > 1) {
+        const int done = testProgress.load();
+        const QString progress = getProgressBar(done, speedtest_.totalProfiles)
+                                 % QLatin1Char(' ')
+                                 % QString::number(100 * done / speedtest_.totalProfiles)
+                                 % QLatin1Char('%');
+        res += QStringLiteral("<p style='text-align:center;margin:0;'>%1</p>").arg(progress);
+        content += QStringLiteral(" (%1 / %2)").arg(done).arg(speedtest_.totalProfiles);
+    }
+    res += QStringLiteral("<p style='text-align:center;margin:0;'>%1</p>").arg(content);
+    return res;
 }
 
 QString DataViewHtmlGenerator::latencyTestSectionHtml() {
     QString res;
-    auto content =
-        latencyTest_.kind == LatencyTestPanelState::Kind::Url ? QString("Running URL test") : QString("Running IP test");
+    auto content = latencyTest_.kind == LatencyTestPanelState::Kind::Url
+                       ? QStringLiteral("Running URL test")
+                       : QStringLiteral("Running IP test");
     if (latencyTest_.totalProfiles > 1) {
-        auto progress = getProgressBar(testProgress.load(), latencyTest_.totalProfiles);
-        progress += QString(" ") + Int2String(100 * testProgress.load() / latencyTest_.totalProfiles) + "%";
-        res = QString("<p style='text-align:center;margin:0;'>%1</p>").arg(progress);
-        content += QString(" (%1 / %2)").arg(Int2String(testProgress.load()), Int2String(latencyTest_.totalProfiles));
+        const int done = testProgress.load();
+        const QString progress = getProgressBar(done, latencyTest_.totalProfiles)
+                                 % QLatin1Char(' ')
+                                 % QString::number(100 * done / latencyTest_.totalProfiles)
+                                 % QLatin1Char('%');
+        res += QStringLiteral("<p style='text-align:center;margin:0;'>%1</p>").arg(progress);
+        content += QStringLiteral(" (%1 / %2)").arg(done).arg(latencyTest_.totalProfiles);
     }
-    res += QString("<p style='text-align:center;margin:0;'>%1</p>").arg(content);
+    res += QStringLiteral("<p style='text-align:center;margin:0;'>%1</p>").arg(content);
     return res;
 }
