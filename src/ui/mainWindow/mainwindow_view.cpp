@@ -2,10 +2,13 @@
 #include "NkrVersion.h"
 
 #include <QApplication>
+#include <QDateTime>
 #include <QHeaderView>
 #include <QScrollBar>
 #include <QTimer>
 #include <QToolButton>
+
+#include <utility>
 
 #include "include/api/RPC.h"
 #include "include/database/GroupsRepo.h"
@@ -127,6 +130,36 @@ void MainWindow::refresh_status(const QString &traffic_update) {
         if (group != nullptr) group_name = group->name;
     }
 
+    const auto route = Configs::dataManager->routesRepo->GetRouteProfile(settings->current_route_id);
+    const QString activeRouteName = (route && route->name != "Default") ? route->name : "";
+
+    StatusSkipKey key;
+    key.runningId = running ? running->id : -1;
+    key.runningGid = running ? running->gid : -1;
+    if (running && running->outbound) {
+        key.outboundName = running->outbound->name;
+        key.typeAndName = running->outbound->DisplayTypeAndName();
+    }
+    key.countryInfo = running ? running->runningCountryInfo : QString();
+    key.groupName = group_name;
+    key.routeId = settings->current_route_id;
+    key.routeName = activeRouteName;
+    key.inboundAddress = settings->inbound_address;
+    key.inboundPort = settings->inbound_socks_port;
+    key.inboundDisabled = settings->disable_mixed_inbound;
+    key.vpn = settings->spmode_vpn;
+    key.sysProxy = settings->spmode_system_proxy;
+    key.sysDns = settings->system_dns_set;
+    key.selectMode = select_mode;
+    key.titleError = title_error;
+    key.admin = Configs::IsAdmin();
+    key.connecting = m_profileConnecting;
+    key.disconnecting = m_profileDisconnecting;
+    key.testWindowActive = (QDateTime::currentSecsSinceEpoch() - last_test_time) <= 2;
+    if (m_hasStatusKey && key == m_lastStatusKey) return;
+    m_lastStatusKey = std::move(key);
+    m_hasStatusKey = true;
+
     if (QDateTime::currentSecsSinceEpoch() - last_test_time > 2) {
         QString runningLabelText;
         if (running) {
@@ -153,9 +186,6 @@ void MainWindow::refresh_status(const QString &traffic_update) {
     } else {
         ui->label_running->setToolTip({});
     }
-
-    const auto route = Configs::dataManager->routesRepo->GetRouteProfile(settings->current_route_id);
-    const QString activeRouteName = (route && route->name != "Default") ? route->name : "";
 
     auto make_title = [=,this](bool isTray) {
         QStringList tt;

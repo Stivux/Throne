@@ -35,9 +35,9 @@ void MainWindow::setup_rpc(QLocalSocket *socket) {
     // Loopers run for the lifetime of the app, start only once
     if (!rpc_started) {
         rpc_started = true;
-        runOnNewThread([=, this] { Stats::trafficLooper->Loop(); });
-        runOnNewThread([=, this] { Stats::connection_lister->Loop(); });
-        runOnNewThread([=, this] { Stats::autoSelectorMonitor->Loop(); });
+        runOnDedicatedThread([=, this] { Stats::trafficLooper->Loop(); });
+        runOnDedicatedThread([=, this] { Stats::connection_lister->Loop(); });
+        runOnDedicatedThread([=, this] { Stats::autoSelectorMonitor->Loop(); });
     }
 }
 

@@ -377,7 +377,37 @@ private:
     QSize designMinimumSize;
 
     QTimer *m_proxyListRefreshDebounce = nullptr;
+    QTimer *m_statusRefreshTimer = nullptr;
+    QTimer *m_logCounterResetTimer = nullptr;
     void scheduleProxyListRefresh();
+
+    // Cheap snapshot of what refresh_status last painted, so the 2s timer
+    // can skip title / tray / icon work when nothing changed.
+    struct StatusSkipKey {
+        int runningId = -1;
+        int runningGid = -1;
+        QString outboundName;
+        QString typeAndName;
+        QString countryInfo;
+        QString groupName;
+        int routeId = -1;
+        QString routeName;
+        QString inboundAddress;
+        int inboundPort = 0;
+        bool inboundDisabled = false;
+        bool vpn = false;
+        bool sysProxy = false;
+        bool sysDns = false;
+        bool selectMode = false;
+        QString titleError;
+        bool admin = false;
+        bool connecting = false;
+        bool disconnecting = false;
+        bool testWindowActive = false;
+        bool operator==(const StatusSkipKey &) const = default;
+    };
+    StatusSkipKey m_lastStatusKey;
+    bool m_hasStatusKey = false;
 
     bool m_adjustingColumns = false;
 

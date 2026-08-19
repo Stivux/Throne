@@ -1,10 +1,11 @@
 #include "include/global/Utils.hpp"
 
-#include "3rdparty/QThreadCreateThread.hpp"
-
 #include <random>
 
 #include <QApplication>
+#include <QMetaObject>
+#include <QThread>
+#include <QThreadPool>
 #include <QUrlQuery>
 #include <QTcpServer>
 #include <QTimer>
@@ -338,35 +339,15 @@ void HideWindow(QWidget *w) {
 void runOnUiThread(const std::function<void()> &callback, bool wait) {
     auto *app = QCoreApplication::instance();
     if (app == nullptr) return;
-    auto thread = app->thread();
-    if (thread == QThread::currentThread()) {
+    const bool sameThread = QThread::currentThread() == app->thread();
+    // Same-thread + wait cannot use BlockingQueuedConnection (deadlock).
+    // Same-thread without wait still queues, so layout helpers keep running
+    // after the current event rather than inline.
+    if (wait && sameThread) {
         callback();
         return;
     }
-    if (!wait) {
-        QMetaObject::invokeMethod(app, callback, Qt::QueuedConnection);
-        return;
-    }
-    auto *timer = new QTimer();
-    timer->moveToThread(thread);
-    timer->setSingleShot(true);
-
-    QEventLoop loop;
-    QObject::connect(timer, &QTimer::timeout, [=, &loop]() {
-        // main thread
-        callback();
-        timer->deleteLater();
-
-        if (wait)
-        {
-            QMetaObject::invokeMethod(&loop, "quit", Qt::QueuedConnection);
-        }
-    });
-    QMetaObject::invokeMethod(timer, "start", Qt::QueuedConnection, Q_ARG(int, 0));
-
-    if (wait && QThread::currentThread() != thread) {
-        loop.exec();
-    }
+    QMetaObject::invokeMethod(app, callback, wait ? Qt::BlockingQueuedConnection : Qt::QueuedConnection);
 }
 
 static QString g_pendingDeeplink;
@@ -436,67 +417,58 @@ void LaunchFiles_FlushPending() {
 }
 
 void runOnNewThread(const std::function<void()> &callback, bool wait) {
-    auto *timer = new QTimer();
-    auto thread = new QThread();
-    timer->moveToThread(thread);
-    timer->setSingleShot(true);
-
-    thread->start();
-    QObject::connect(thread, &QThread::finished, thread, &QObject::deleteLater);
-
-    QEventLoop loop;
-    QObject::connect(timer, &QTimer::timeout, [=, &loop]() {
-        callback();
-        timer->deleteLater();
-        QMetaObject::invokeMethod(thread, "quit", Qt::QueuedConnection);
-
-        if (wait)
-        {
-            QMetaObject::invokeMethod(&loop, "quit", Qt::QueuedConnection);
-        }
-    });
-    QMetaObject::invokeMethod(timer, "start", Qt::QueuedConnection, Q_ARG(int, 0));
-
-    if (wait && QThread::currentThread() != thread) {
-        loop.exec();
+    if (!wait) {
+        QThreadPool::globalInstance()->start(callback);
+        return;
     }
+    // Dedicated thread so a blocking wait is never queued behind a saturated pool.
+    auto *thread = QThread::create(callback);
+    if (thread == nullptr) return;
+    thread->start();
+    thread->wait();
+    delete thread;
+}
+
+void runOnDedicatedThread(std::function<void()> callback) {
+    auto *thread = QThread::create(std::move(callback));
+    if (thread == nullptr) return;
+    QObject::connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+    thread->start();
 }
 
 void runOnThread(const std::function<void()> &callback, QObject *parent, bool wait) {
-    auto *timer = new QTimer();
-    auto thread = dynamic_cast<QThread *>(parent);
-    if (thread == nullptr) {
-        timer->moveToThread(parent->thread());
-        thread = parent->thread();
-    } else {
-        timer->moveToThread(thread);
-    }
-    timer->setSingleShot(true);
+    if (parent == nullptr) return;
 
-    QEventLoop loop;
-    QObject::connect(timer, &QTimer::timeout, [=, &loop]() {
+    // A QThread object's affinity is the thread that created it, not the
+    // worker it represents. Post via a hop object moved onto that worker.
+    auto *ownedThread = qobject_cast<QThread *>(parent);
+    QThread *targetThread = ownedThread ? ownedThread : parent->thread();
+    if (targetThread == nullptr) return;
+
+    const bool sameThread = QThread::currentThread() == targetThread;
+    if (wait && sameThread) {
         callback();
-        timer->deleteLater();
-
-        if (wait)
-        {
-            QMetaObject::invokeMethod(&loop, "quit", Qt::QueuedConnection);
-        }
-    });
-    QMetaObject::invokeMethod(timer, "start", Qt::QueuedConnection, Q_ARG(int, 0));
-
-    if (wait && QThread::currentThread() != thread) {
-        loop.exec();
+        return;
     }
+
+    const auto type = wait ? Qt::BlockingQueuedConnection : Qt::QueuedConnection;
+    if (ownedThread) {
+        auto *hop = new QObject;
+        hop->moveToThread(ownedThread);
+        QMetaObject::invokeMethod(hop, [callback, hop] {
+            callback();
+            hop->deleteLater();
+        }, type);
+        return;
+    }
+
+    QMetaObject::invokeMethod(parent, callback, type);
 }
 
 void setTimeout(const std::function<void()> &callback, QObject *obj, int timeout) {
-    auto t = new QTimer;
-    QObject::connect(t, &QTimer::timeout, obj, [=] {
-        callback();
-        t->deleteLater();
-    });
-    t->setSingleShot(true);
-    t->setInterval(timeout);
-    t->start();
+    if (obj == nullptr) {
+        QTimer::singleShot(timeout, callback);
+        return;
+    }
+    QTimer::singleShot(timeout, obj, callback);
 }

@@ -6,9 +6,10 @@
 
 #include "include/global/Configs.hpp"
 
+#include <QApplication>
 #include <QDir>
 #include <QFileInfo>
-#include <QThread>
+#include <QTimer>
 
 namespace Configs {
     std::string DatabaseManager::deriveStatsDbPath(const std::string& dbPath) {
@@ -66,10 +67,11 @@ namespace Configs {
     }
     
     void DatabaseManager::RunDeferredMaintenance() {
-        runOnNewThread([this] {
-            QThread::msleep(MAINTENANCE_DELAY_MS);
-            db.RunMaintenance();
-            statsDb.RunMaintenance();
+        QTimer::singleShot(MAINTENANCE_DELAY_MS, qApp, [this] {
+            runOnNewThread([this] {
+                db.RunMaintenance();
+                statsDb.RunMaintenance();
+            });
         });
     }
 

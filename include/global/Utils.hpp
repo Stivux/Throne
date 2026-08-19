@@ -290,7 +290,14 @@ void HideWindow(QWidget *w);
 
 void runOnUiThread(const std::function<void()> &callback, bool wait = false);
 
+// One-shot work. wait=false uses the global QThreadPool (callback must return;
+// an infinite loop would occupy a pool thread forever — use
+// runOnDedicatedThread). wait=true starts a dedicated QThread immediately and
+// joins it, so the caller is never queued behind other pool jobs.
 void runOnNewThread(const std::function<void()> &callback, bool wait = false);
+
+// Owns a QThread until callback returns. Use for loops that never return.
+void runOnDedicatedThread(std::function<void()> callback);
 
 void runOnThread(const std::function<void()> &callback, QObject *parent, bool wait = false);
 

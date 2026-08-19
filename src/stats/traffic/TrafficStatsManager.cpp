@@ -31,7 +31,7 @@ namespace Stats {
         if (started.exchange(true)) return;
         // Catch-up pass first (downsample anything that aged past the minute
         // window while the app was closed), then keep doing it on a slow cadence.
-        runOnNewThread([this] {
+        runOnDedicatedThread([this] {
             runRollupOnce();
             while (true) {
                 QThread::msleep(kRollupIntervalMs);

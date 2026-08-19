@@ -1091,13 +1091,15 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
 
     connect(qApp, &QGuiApplication::commitDataRequest, this, &MainWindow::on_commitDataRequest);
 
-    auto t = new QTimer;
-    connect(t, &QTimer::timeout, this, [=,this]() { refresh_status(); });
-    t->start(2000);
+    m_statusRefreshTimer = new QTimer(this);
+    connect(m_statusRefreshTimer, &QTimer::timeout, this, [this] { refresh_status(); });
+    m_statusRefreshTimer->start(2000);
 
-    t = new QTimer;
-    connect(t, &QTimer::timeout, this, [&] { Configs_sys::logCounter.fetchAndStoreRelaxed(0); });
-    t->start(1000);
+    m_logCounterResetTimer = new QTimer(this);
+    connect(m_logCounterResetTimer, &QTimer::timeout, this, [] {
+        Configs_sys::logCounter.fetchAndStoreRelaxed(0);
+    });
+    m_logCounterResetTimer->start(1000);
 
     // Debounced so font/theme/resize changes settle; fired from changeEvent,
     // resizeEvent and ThemeManager::themeChanged.

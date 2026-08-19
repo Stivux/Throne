@@ -6,15 +6,15 @@
 namespace {
     constexpr int READONLY_CODE_WIDTH = 110;
 
-    QIcon RecolorIcon(const QString &path, const QColor &color) {
-        QPixmap pixmap(path);
-        if (pixmap.isNull()) return QIcon(path);
-        QPainter painter(&pixmap);
-        painter.setCompositionMode(QPainter::CompositionMode_SourceIn);
-        painter.fillRect(pixmap.rect(), color);
-        painter.end();
-        return QIcon(pixmap);
-    }
+    // QIcon RecolorIcon(const QString &path, const QColor &color) {
+    //     QPixmap pixmap(path);
+    //     if (pixmap.isNull()) return QIcon(path);
+    //     QPainter painter(&pixmap);
+    //     painter.setCompositionMode(QPainter::CompositionMode_SourceIn);
+    //     painter.fillRect(pixmap.rect(), color);
+    //     painter.end();
+    //     return QIcon(pixmap);
+    // }
 } // namespace
 
 OtpItem::OtpItem(QWidget *parent, std::shared_ptr<Configs::OtpProfile> profile_, QListWidgetItem *item_,
