@@ -15,4 +15,4 @@ signals:
     void themeChanged(QString themeName);
 };
 
-extern ThemeManager *themeManager;
+ThemeManager *themeManager();

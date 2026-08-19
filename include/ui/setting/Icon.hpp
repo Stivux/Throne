@@ -1,17 +1,21 @@
 #pragma once
 
-#include <QPixmap>
+#include <QIcon>
 
 namespace Icon {
 
-    enum TrayIconStatus {
-        NONE,
-        RUNNING,
-        SYSTEM_PROXY,
-        VPN,
-        DNS,
-        SYSTEM_PROXY_DNS,
+    enum class TrayIconStatus {
+        None,
+        Running,
+        SystemProxy,
+        Vpn,
+        Dns,
+        SystemProxyDns,
     };
 
-    QPixmap GetTrayIcon(TrayIconStatus status);
+    QIcon GetTrayIcon(TrayIconStatus status);
+
+    // Drop cached icons so the next GetTrayIcon reloads from disk/resources.
+    // Call when custom-icon files are replaced or the custom-icon setting flips.
+    void InvalidateTrayIconCache();
 } // namespace Icon

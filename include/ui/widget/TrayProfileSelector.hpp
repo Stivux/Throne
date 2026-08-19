@@ -1,15 +1,14 @@
 #pragma once
 
-#include <QFrame>
 #include <QString>
 #include <QStringList>
 #include <QList>
 #include <functional>
 #include <utility>
 
+#include "include/ui/widget/TrayPopupFrame.hpp"
+
 class QLabel;
-class QLineEdit;
-class QListWidget;
 class QListWidgetItem;
 class QPushButton;
 class QTimer;
@@ -26,7 +25,7 @@ class QTimer;
 // Behaviour: a rounded card with a debounced search box on top over a compact, paginated
 // list. A single click (or Enter) selects; it closes when it loses focus (like a menu) and
 // also has an explicit Close button.
-class TrayProfileSelector : public QFrame {
+class TrayProfileSelector : public TrayPopupFrame {
     Q_OBJECT
 public:
     enum Mode { Server, Routing };
@@ -45,14 +44,11 @@ public:
 
     TrayProfileSelector(Mode mode, Callbacks cb, QWidget *parent = nullptr);
 
-    // Show the panel anchored near globalPos (kept fully on the containing screen) and
-    // focus the search box. Resets navigation/search to the top level first.
-    void popupAt(const QPoint &globalPos);
-
 protected:
     bool event(QEvent *e) override;                     // close when the panel loses activation
-    void keyPressEvent(QKeyEvent *e) override;          // Esc closes
     bool eventFilter(QObject *obj, QEvent *e) override; // list/search key handling
+    void preparePopup() override;
+    void afterShow() override;
 
 private:
     void rebuild();                     // repopulate for the current view/query/page
@@ -80,12 +76,10 @@ private:
     QList<std::pair<int, QString>> m_routeCache;
     QStringList m_routeCacheLower;
 
-    QLineEdit *m_search = nullptr;
     QTimer *m_debounce = nullptr;
     QPushButton *m_backBtn = nullptr;
     QLabel *m_title = nullptr;
     QPushButton *m_stopBtn = nullptr;
-    QListWidget *m_list = nullptr;
     QPushButton *m_prevBtn = nullptr;
     QLabel *m_pageLabel = nullptr;
     QPushButton *m_nextBtn = nullptr;

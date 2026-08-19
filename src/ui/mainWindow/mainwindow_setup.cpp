@@ -154,7 +154,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     if (isNum) {
         Configs::dataManager->settingsRepo->theme = "System";
     }
-    themeManager->ApplyTheme(Configs::dataManager->settingsRepo->theme);
+    themeManager()->ApplyTheme(Configs::dataManager->settingsRepo->theme);
     ui->setupUi(this);
 
     // init shortcuts
@@ -185,10 +185,10 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
 #if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
     connect(qApp->styleHints(), &QStyleHints::colorSchemeChanged, this, [=,this](const Qt::ColorScheme& scheme) {
         setLogHighlighter(scheme == Qt::ColorScheme::Dark);
-        themeManager->ApplyTheme(Configs::dataManager->settingsRepo->theme, true);
+        themeManager()->ApplyTheme(Configs::dataManager->settingsRepo->theme, true);
     });
 #endif
-    connect(themeManager, &ThemeManager::themeChanged, this, [=,this](const QString& theme){
+    connect(themeManager(), &ThemeManager::themeChanged, this, [=,this](const QString& theme){
         setLogHighlighter(themeUsesDarkLog(theme));
         scheduleProxyListRefresh();
     });
@@ -702,8 +702,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
 
     // Setup Tray
     tray = new QSystemTrayIcon(nullptr);
-    tray->setIcon(GetTrayIcon(Icon::NONE));
-    QApplication::setWindowIcon(Icon::GetTrayIcon(Icon::NONE));
+    tray->setIcon(GetTrayIcon(Icon::TrayIconStatus::None));
+    QApplication::setWindowIcon(Icon::GetTrayIcon(Icon::TrayIconStatus::None));
     trayMenu = new QMenu();
     trayMenu->addAction(ui->actionShow_window);
     trayMenu->addSeparator();

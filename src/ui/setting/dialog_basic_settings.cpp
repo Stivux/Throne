@@ -184,7 +184,7 @@ DialogBasicSettings::DialogBasicSettings(QWidget *parent)
     }
     //
     connect(ui->theme, &QComboBox::currentIndexChanged, this, [=,this](int index) {
-        themeManager->ApplyTheme(ui->theme->currentText());
+        themeManager()->ApplyTheme(ui->theme->currentText());
         Configs::dataManager->settingsRepo->theme = ui->theme->currentText();
         Configs::dataManager->settingsRepo->Save();
     });

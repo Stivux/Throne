@@ -6,9 +6,14 @@
 #include <QMap>
 
 #include "include/ui/setting/ThemeManager.hpp"
-#include "iostream"
 
-ThemeManager *themeManager = new ThemeManager;
+#include <QGlobalStatic>
+
+Q_GLOBAL_STATIC(ThemeManager, themeManagerInstance)
+
+ThemeManager *themeManager() {
+    return themeManagerInstance();
+}
 
 extern QString ReadFileText(const QString &path);
 
