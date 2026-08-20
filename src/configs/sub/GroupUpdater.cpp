@@ -8,6 +8,10 @@
 #include <QUrlQuery>
 #include <QJsonDocument>
 #include <QHash>
+#include <array>
+#include <functional>
+#include <utility>
+#include <vector>
 
 #include "include/configs/common/utils.h"
 #include "include/database/GroupsRepo.h"
@@ -31,7 +35,7 @@ namespace Subscription {
     QList<QString> Disect(const QString &str) {
         QList<QString> res = QList<QString>();
         int idx=0;
-        int sz = str.size();
+        const int sz = str.size();
         while(idx < sz) {
             if (str[idx] == '\n') {
                 idx++;
@@ -158,6 +162,97 @@ namespace Subscription {
         if (auto tag = out["tag"].toString(); !tag.isEmpty()) ent->Custom()->name = tag;
         return ent;
     }
+
+    // ---- Protocol dispatch tables --------------------------------------
+    // One row maps wire keys that identify a protocol in a subscription format
+    // (link prefixes, or a "type" field) to the Throne profile type that owns
+    // it.  `parse` is the virtual entry point to call on the freshly-created
+    // profile's outbound — ParseFrom* is virtual on Configs::outbound, so the
+    // dynamic_cast accessors (Profile::Socks() etc.) are unnecessary here.
+
+    template <typename Source>
+    struct ProtocolRow {
+        std::vector<QStringView> keys;
+        QStringView profileType;
+        bool (Configs::outbound::*parse)(const Source &);
+    };
+
+    // Create a profile of `profileType`, then run `parse` on its outbound.
+    // Returns the profile, or nullptr if creation or the parse failed.
+    template <typename Source, typename ParseFn>
+    std::shared_ptr<Configs::Profile> makeParsedProfile(
+        QStringView profileType, const Source &source, ParseFn &&parse)
+    {
+        auto ent = Configs::ProfilesRepo::NewProfile(profileType.toString());
+        if (ent == nullptr || ent->outbound == nullptr) return {};
+        if (!std::invoke(std::forward<ParseFn>(parse), ent->outbound.get(), source)) return {};
+        return ent;
+    }
+
+    // First row whose key matches `wireKey` wins; prefixMatch selects
+    // startsWith vs equality.  nullptr when nothing matched or the parse failed.
+    template <typename Source, typename Rows>
+    std::shared_ptr<Configs::Profile> dispatchProtocol(
+        QStringView wireKey, Rows &&rows, bool prefixMatch, const Source &source)
+    {
+        for (const auto &row : rows)
+            for (QStringView key : row.keys)
+                if (prefixMatch ? wireKey.startsWith(key) : wireKey == key)
+                    return makeParsedProfile(row.profileType, source, row.parse);
+        return nullptr;
+    }
+
+    // link format: URI prefix -> (profile type, ParseFromLink)
+    const std::array kLinkParsers = {
+        ProtocolRow<QString>{{u"socks5://", u"socks4://", u"socks4a://", u"socks://"}, u"socks",       &Configs::outbound::ParseFromLink},
+        ProtocolRow<QString>{{u"http://", u"https://"},                                 u"http",        &Configs::outbound::ParseFromLink},
+        ProtocolRow<QString>{{u"ss://"},                                                u"shadowsocks", &Configs::outbound::ParseFromLink},
+        ProtocolRow<QString>{{u"vmess://"},                                             u"vmess",       &Configs::outbound::ParseFromLink},
+        ProtocolRow<QString>{{u"trojan://"},                                            u"trojan",      &Configs::outbound::ParseFromLink},
+        ProtocolRow<QString>{{u"anytls://"},                                            u"anytls",      &Configs::outbound::ParseFromLink},
+        ProtocolRow<QString>{{u"mierus://", u"mieru://"},                               u"mieru",       &Configs::outbound::ParseFromLink},
+        ProtocolRow<QString>{{u"hysteria://", u"hysteria2://", u"hy2://"},              u"hysteria",    &Configs::outbound::ParseFromLink},
+        ProtocolRow<QString>{{u"tuic://"},                                              u"tuic",        &Configs::outbound::ParseFromLink},
+        ProtocolRow<QString>{{u"juicity://"},                                           u"juicity",     &Configs::outbound::ParseFromLink},
+        ProtocolRow<QString>{{u"tt://"},                                                u"trusttunnel", &Configs::outbound::ParseFromLink},
+        ProtocolRow<QString>{{u"shadowtls://"},                                         u"shadowtls",   &Configs::outbound::ParseFromLink},
+        ProtocolRow<QString>{{u"wg://"},                                                u"wireguard",   &Configs::outbound::ParseFromLink},
+        ProtocolRow<QString>{{u"ssh://"},                                               u"ssh",         &Configs::outbound::ParseFromLink},
+        ProtocolRow<QString>{{u"naive+https://", u"naive+quic://"},                     u"naive",       &Configs::outbound::ParseFromLink},
+    };
+
+    // sing-box format: "type" -> (profile type, ParseFromJson)
+    const std::array kJsonParsers = {
+        ProtocolRow<QJsonObject>{{u"socks"},                    u"socks",       &Configs::outbound::ParseFromJson},
+        ProtocolRow<QJsonObject>{{u"http"},                     u"http",        &Configs::outbound::ParseFromJson},
+        ProtocolRow<QJsonObject>{{u"shadowsocks"},              u"shadowsocks", &Configs::outbound::ParseFromJson},
+        ProtocolRow<QJsonObject>{{u"vmess"},                    u"vmess",       &Configs::outbound::ParseFromJson},
+        ProtocolRow<QJsonObject>{{u"vless"},                    u"vless",       &Configs::outbound::ParseFromJson},
+        ProtocolRow<QJsonObject>{{u"trojan"},                   u"trojan",      &Configs::outbound::ParseFromJson},
+        ProtocolRow<QJsonObject>{{u"anytls"},                   u"anytls",      &Configs::outbound::ParseFromJson},
+        ProtocolRow<QJsonObject>{{u"mieru"},                    u"mieru",       &Configs::outbound::ParseFromJson},
+        ProtocolRow<QJsonObject>{{u"hysteria", u"hysteria2"},   u"hysteria",    &Configs::outbound::ParseFromJson},
+        ProtocolRow<QJsonObject>{{u"tuic"},                     u"tuic",        &Configs::outbound::ParseFromJson},
+        ProtocolRow<QJsonObject>{{u"juicity"},                  u"juicity",     &Configs::outbound::ParseFromJson},
+        ProtocolRow<QJsonObject>{{u"trusttunnel"},              u"trusttunnel", &Configs::outbound::ParseFromJson},
+        ProtocolRow<QJsonObject>{{u"shadowtls"},                u"shadowtls",   &Configs::outbound::ParseFromJson},
+        ProtocolRow<QJsonObject>{{u"wireguard"},                u"wireguard",   &Configs::outbound::ParseFromJson},
+        ProtocolRow<QJsonObject>{{u"ssh"},                      u"ssh",         &Configs::outbound::ParseFromJson},
+        ProtocolRow<QJsonObject>{{u"naive"},                    u"naive",       &Configs::outbound::ParseFromJson},
+    };
+
+    // clash format: "type" -> (profile type, ParseFromClash)
+    const std::array kClashParsers = {
+        ProtocolRow<clash::Proxies>{{u"socks5"},                  u"socks",       &Configs::outbound::ParseFromClash},
+        ProtocolRow<clash::Proxies>{{u"http"},                    u"http",        &Configs::outbound::ParseFromClash},
+        ProtocolRow<clash::Proxies>{{u"ss"},                      u"shadowsocks", &Configs::outbound::ParseFromClash},
+        ProtocolRow<clash::Proxies>{{u"vmess"},                   u"vmess",       &Configs::outbound::ParseFromClash},
+        ProtocolRow<clash::Proxies>{{u"trojan"},                  u"trojan",      &Configs::outbound::ParseFromClash},
+        ProtocolRow<clash::Proxies>{{u"anytls"},                  u"anytls",      &Configs::outbound::ParseFromClash},
+        ProtocolRow<clash::Proxies>{{u"hysteria", u"hysteria2"},  u"hysteria",    &Configs::outbound::ParseFromClash},
+        ProtocolRow<clash::Proxies>{{u"tuic"},                    u"tuic",        &Configs::outbound::ParseFromClash},
+        ProtocolRow<clash::Proxies>{{u"ssh"},                     u"ssh",         &Configs::outbound::ParseFromClash},
+    };
 
     void RawUpdater::update(const QString &str, bool needParse, bool isBase64Decoded) {
         // Base64 encoded subscription
@@ -294,124 +389,14 @@ namespace Subscription {
             }
         }
 
-        // SOCKS
-        if (str.startsWith("socks5://") || str.startsWith("socks4://") ||
-            str.startsWith("socks4a://") || str.startsWith("socks://")) {
-            ent = Configs::ProfilesRepo::NewProfile("socks");
-            auto ok = ent->Socks()->ParseFromLink(str);
-            if (!ok) return;
-        }
-
-        // HTTP
-        if (str.startsWith("http://") || str.startsWith("https://")) {
-            ent = Configs::ProfilesRepo::NewProfile("http");
-            auto ok = ent->Http()->ParseFromLink(str);
-            if (!ok) return;
-        }
-
-        // ShadowSocks
-        if (str.startsWith("ss://")) {
-            ent = Configs::ProfilesRepo::NewProfile("shadowsocks");
-            auto ok = ent->ShadowSocks()->ParseFromLink(str);
-            if (!ok) return;
-        }
-
-        // VMess
-        if (str.startsWith("vmess://")) {
-            ent = Configs::ProfilesRepo::NewProfile("vmess");
-            auto ok = ent->VMess()->ParseFromLink(str);
-            if (!ok) return;
-        }
-
-        // VLESS
+        // VLESS splits into plain / xray by link shape; everything else is
+        // resolved from the prefix table.
         if (str.startsWith("vless://")) {
-            if (Configs::useXrayVless(str)) {
-                ent = Configs::ProfilesRepo::NewProfile("xrayvless");
-                auto ok = ent->XrayVLESS()->ParseFromLink(str);
-                if (!ok) return;
-            } else {
-                ent = Configs::ProfilesRepo::NewProfile("vless");
-                auto ok = ent->VLESS()->ParseFromLink(str);
-                if (!ok) return;
-            }
-        }
-
-        // Trojan
-        if (str.startsWith("trojan://")) {
-            ent = Configs::ProfilesRepo::NewProfile("trojan");
-            auto ok = ent->Trojan()->ParseFromLink(str);
-            if (!ok) return;
-        }
-
-        // AnyTLS
-        if (str.startsWith("anytls://")) {
-            ent = Configs::ProfilesRepo::NewProfile("anytls");
-            auto ok = ent->AnyTLS()->ParseFromLink(str);
-            if (!ok) return;
-        }
-
-        // Mieru (mierus:// is the "simple" sharing link; the base64 "standard"
-        // mieru:// link is rejected inside ParseFromLink rather than mis-parsed)
-        if (str.startsWith("mierus://") || str.startsWith("mieru://")) {
-            ent = Configs::ProfilesRepo::NewProfile("mieru");
-            auto ok = ent->Mieru()->ParseFromLink(str);
-            if (!ok) return;
-        }
-
-        // Hysteria
-        if (str.startsWith("hysteria://") || str.startsWith("hysteria2://") || str.startsWith("hy2://")) {
-            ent = Configs::ProfilesRepo::NewProfile("hysteria");
-            auto ok = ent->Hysteria()->ParseFromLink(str);
-            if (!ok) return;
-        }
-
-        // TUIC
-        if (str.startsWith("tuic://")) {
-            ent = Configs::ProfilesRepo::NewProfile("tuic");
-            auto ok = ent->TUIC()->ParseFromLink(str);
-            if (!ok) return;
-        }
-
-        // Juicity
-        if (str.startsWith("juicity://")) {
-            ent = Configs::ProfilesRepo::NewProfile("juicity");
-            auto ok = ent->Juicity()->ParseFromLink(str);
-            if (!ok) return;
-        }
-
-        // TrustTunnel
-        if (str.startsWith("tt://")) {
-            ent = Configs::ProfilesRepo::NewProfile("trusttunnel");
-            auto ok = ent->TrustTunnel()->ParseFromLink(str);
-            if (!ok) return;
-        }
-
-        // ShadowTLS
-        if (str.startsWith("shadowtls://")) {
-            ent = Configs::ProfilesRepo::NewProfile("shadowtls");
-            auto ok = ent->ShadowTLS()->ParseFromLink(str);
-            if (!ok) return;
-        }
-
-        // Wireguard
-        if (str.startsWith("wg://")) {
-            ent = Configs::ProfilesRepo::NewProfile("wireguard");
-            auto ok = ent->Wireguard()->ParseFromLink(str);
-            if (!ok) return;
-        }
-
-        // SSH
-        if (str.startsWith("ssh://")) {
-            ent = Configs::ProfilesRepo::NewProfile("ssh");
-            auto ok = ent->SSH()->ParseFromLink(str);
-            if (!ok) return;
-        }
-
-        // Naive
-        if (str.startsWith("naive+https://") || str.startsWith("naive+quic://")) {
-            ent = Configs::ProfilesRepo::NewProfile("naive");
-            auto ok = ent->Naive()->ParseFromLink(str);
-            if (!ok) return;
+            ent = Configs::useXrayVless(str)
+                ? makeParsedProfile(u"xrayvless", str, &Configs::outbound::ParseFromLink)
+                : makeParsedProfile(u"vless", str, &Configs::outbound::ParseFromLink);
+        } else {
+            ent = dispatchProtocol(str, kLinkParsers, /*prefixMatch=*/true, str);
         }
 
         if (ent == nullptr) return;
@@ -455,118 +440,7 @@ namespace Subscription {
 
             std::shared_ptr<Configs::Profile> ent;
 
-            // SOCKS
-            if (out["type"] == "socks") {
-                ent = Configs::ProfilesRepo::NewProfile("socks");
-                auto ok = ent->Socks()->ParseFromJson(out);
-                if (!ok) continue;
-            }
-
-            // HTTP
-            if (out["type"] == "http") {
-                ent = Configs::ProfilesRepo::NewProfile("http");
-                auto ok = ent->Http()->ParseFromJson(out);
-                if (!ok) continue;
-            }
-
-            // ShadowSocks
-            if (out["type"] == "shadowsocks") {
-                ent = Configs::ProfilesRepo::NewProfile("shadowsocks");
-                auto ok = ent->ShadowSocks()->ParseFromJson(out);
-                if (!ok) continue;
-            }
-
-            // VMess
-            if (out["type"] == "vmess") {
-                ent = Configs::ProfilesRepo::NewProfile("vmess");
-                auto ok = ent->VMess()->ParseFromJson(out);
-                if (!ok) continue;
-            }
-
-            // VLESS
-            if (out["type"] == "vless") {
-                ent = Configs::ProfilesRepo::NewProfile("vless");
-                auto ok = ent->VLESS()->ParseFromJson(out);
-                if (!ok) continue;
-            }
-
-            // Trojan
-            if (out["type"] == "trojan") {
-                ent = Configs::ProfilesRepo::NewProfile("trojan");
-                auto ok = ent->Trojan()->ParseFromJson(out);
-                if (!ok) continue;
-            }
-
-            // AnyTLS
-            if (out["type"] == "anytls") {
-                ent = Configs::ProfilesRepo::NewProfile("anytls");
-                auto ok = ent->AnyTLS()->ParseFromJson(out);
-                if (!ok) continue;
-            }
-
-            // Mieru
-            if (out["type"] == "mieru") {
-                ent = Configs::ProfilesRepo::NewProfile("mieru");
-                auto ok = ent->Mieru()->ParseFromJson(out);
-                if (!ok) continue;
-            }
-
-            // Hysteria
-            if (out["type"] == "hysteria" || out["type"] == "hysteria2") {
-                ent = Configs::ProfilesRepo::NewProfile("hysteria");
-                auto ok = ent->Hysteria()->ParseFromJson(out);
-                if (!ok) continue;
-            }
-
-            // TUIC
-            if (out["type"] == "tuic") {
-                ent = Configs::ProfilesRepo::NewProfile("tuic");
-                auto ok = ent->TUIC()->ParseFromJson(out);
-                if (!ok) continue;
-            }
-
-            // Juicity
-            if (out["type"] == "juicity") {
-                ent = Configs::ProfilesRepo::NewProfile("juicity");
-                auto ok = ent->Juicity()->ParseFromJson(out);
-                if (!ok) continue;
-            }
-
-            // TrustTunnel
-            if (out["type"] == "trusttunnel") {
-                ent = Configs::ProfilesRepo::NewProfile("trusttunnel");
-                auto ok = ent->TrustTunnel()->ParseFromJson(out);
-                if (!ok) continue;
-            }
-
-            // ShadowTLS
-            if (out["type"] == "shadowtls") {
-                ent = Configs::ProfilesRepo::NewProfile("shadowtls");
-                auto ok = ent->ShadowTLS()->ParseFromJson(out);
-                if (!ok) continue;
-            }
-
-            // Wireguard
-            if (out["type"] == "wireguard") {
-                ent = Configs::ProfilesRepo::NewProfile("wireguard");
-                auto ok = ent->Wireguard()->ParseFromJson(out);
-                if (!ok) continue;
-            }
-
-            // SSH
-            if (out["type"] == "ssh") {
-                ent = Configs::ProfilesRepo::NewProfile("ssh");
-                auto ok = ent->SSH()->ParseFromJson(out);
-                if (!ok) continue;
-            }
-
-            // Naive
-            if (out["type"] == "naive") {
-                ent = Configs::ProfilesRepo::NewProfile("naive");
-                auto ok = ent->Naive()->ParseFromJson(out);
-                if (!ok) continue;
-            }
-
+            ent = dispatchProtocol(out["type"].toString(), kJsonParsers, /*prefixMatch=*/false, out);
             if (ent == nullptr) continue;
 
             updated_order += ent;
@@ -642,83 +516,18 @@ namespace Subscription {
             for (const auto& out : clash_config.proxies)
             {
                 std::shared_ptr<Configs::Profile> ent;
-    
-                // SOCKS
-                if (out.type == "socks5") {
-                    ent = Configs::ProfilesRepo::NewProfile("socks");
-                    auto ok = ent->Socks()->ParseFromClash(out);
-                    if (!ok) continue;
-                }
-    
-                // HTTP
-                if (out.type == "http") {
-                    ent = Configs::ProfilesRepo::NewProfile("http");
-                    auto ok = ent->Http()->ParseFromClash(out);
-                    if (!ok) continue;
-                }
-    
-                // ShadowSocks
-                if (out.type == "ss") {
-                    ent = Configs::ProfilesRepo::NewProfile("shadowsocks");
-                    auto ok = ent->ShadowSocks()->ParseFromClash(out);
-                    if (!ok) continue;
-                }
-    
-                // VMess
-                if (out.type == "vmess") {
-                    ent = Configs::ProfilesRepo::NewProfile("vmess");
-                    auto ok = ent->VMess()->ParseFromClash(out);
-                    if (!ok) continue;
-                }
-    
-                // VLESS
+
+                // VLESS splits into plain / xray by clash metadata; everything
+                // else is resolved from the type table.
                 if (out.type == "vless") {
-                    if (out.network == "xhttp" || (!out.encryption.empty() && out.encryption != "none")) {
-                        ent = Configs::ProfilesRepo::NewProfile("xrayvless");
-                        auto ok = ent->XrayVLESS()->ParseFromClash(out);
-                        if (!ok) continue;
-                    } else {
-                        ent = Configs::ProfilesRepo::NewProfile("vless");
-                        auto ok = ent->VLESS()->ParseFromClash(out);
-                        if (!ok) continue;
-                    }
+                    const bool xrayForm = out.network == "xhttp"
+                        || (!out.encryption.empty() && out.encryption != "none");
+                    ent = xrayForm
+                        ? makeParsedProfile(u"xrayvless", out, &Configs::outbound::ParseFromClash)
+                        : makeParsedProfile(u"vless", out, &Configs::outbound::ParseFromClash);
+                } else {
+                    ent = dispatchProtocol(QString::fromStdString(out.type), kClashParsers, /*prefixMatch=*/false, out);
                 }
-    
-                // Trojan
-                if (out.type == "trojan") {
-                    ent = Configs::ProfilesRepo::NewProfile("trojan");
-                    auto ok = ent->Trojan()->ParseFromClash(out);
-                    if (!ok) continue;
-                }
-    
-                // AnyTLS
-                if (out.type == "anytls") {
-                    ent = Configs::ProfilesRepo::NewProfile("anytls");
-                    auto ok = ent->AnyTLS()->ParseFromClash(out);
-                    if (!ok) continue;
-                }
-    
-                // Hysteria
-                if (out.type == "hysteria" || out.type == "hysteria2") {
-                    ent = Configs::ProfilesRepo::NewProfile("hysteria");
-                    auto ok = ent->Hysteria()->ParseFromClash(out);
-                    if (!ok) continue;
-                }
-    
-                // TUIC
-                if (out.type == "tuic") {
-                    ent = Configs::ProfilesRepo::NewProfile("tuic");
-                    auto ok = ent->TUIC()->ParseFromClash(out);
-                    if (!ok) continue;
-                }
-    
-                // SSH
-                if (out.type == "ssh") {
-                    ent = Configs::ProfilesRepo::NewProfile("ssh");
-                    auto ok = ent->SSH()->ParseFromClash(out);
-                    if (!ok) continue;
-                }
-    
                 if (ent == nullptr) continue;
     
                 updated_order += ent;
